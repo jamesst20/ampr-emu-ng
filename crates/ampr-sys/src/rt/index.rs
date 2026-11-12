@@ -673,6 +673,7 @@ impl BufWriter {
 
 const O_RDONLY: c_int = 0x0;
 const O_WRONLY: c_int = 0x1;
+const O_RDWR: c_int = 0x2;
 const O_CREAT: c_int = 0x200;
 const O_TRUNC: c_int = 0x400;
 const O_DIRECTORY: c_int = 0x20000;
@@ -1955,10 +1956,36 @@ unsafe fn copy_dir_path(l: &Lookup, out: &mut [u8]) -> bool {
     true
 }
 
+/// `mkdir`: directory creation in a fake-mounted title. A `/devlog` path is
+/// rewritten to the runtime's writable tree (rt/devlog.rs), so the game's own
+/// mkdir calls build the log and shader-cache directories there; an indexed
+/// directory already exists and answers EEXIST as the real one would; every
+/// other path reaches the original.
+pub unsafe extern "C" fn posix_mkdir_emul(path: *const c_char, mode: SceKernelMode) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
+    if unsafe { lookup_resident_path(path) }.state == Resident::Directory {
+        set_errno(EEXIST);
+        return -1;
+    }
+    type F = unsafe extern "C" fn(*const c_char, c_int) -> c_int;
+    let f = unsafe { kernel_slot::<F>(hook::mkdir) }
+        .or_else(|| unsafe { resolve_kernel::<F>(c"mkdir") });
+    f.map_or_else(
+        || {
+            set_errno(EIO);
+            -1
+        },
+        |f| unsafe { f(path, mode as c_int) },
+    )
+}
+
 /// `posix_open_impl`: the published index answers /app0; an authoritative
 /// miss returns at once (see `miss_is_authoritative`), other misses and
 /// indexed loose files reach the physical open.
 unsafe fn open_impl(path: *const c_char, flags: c_int, mode: SceKernelMode) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     unsafe { open_with(path, flags, mode, real_posix_open, b'o') }
 }
 
@@ -2010,6 +2037,14 @@ unsafe fn open_resolved(
     match l.state {
         Resident::Directory => {
             stats::add(stats::Stat::OpenDirectory, 1);
+            // A real directory refuses a write or create open (EISDIR), and
+            // the index's directory must behave the same: passing O_CREAT on
+            // to the FS created a *file* where the game expects a directory
+            // (a read-write KCD2 image gained a 20-byte /app0/data that way).
+            if flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC) != 0 {
+                set_errno(EISDIR);
+                return -1;
+            }
             let mut canon = [0u8; RUNTIME_PATH_CAPACITY];
             if !unsafe { copy_dir_path(&l, &mut canon) } {
                 set_errno(ENAMETOOLONG);
@@ -2105,6 +2140,8 @@ unsafe fn open_resolved(
 
 /// `posix_stat_impl`.
 unsafe fn stat_impl(path: *const c_char, sb: *mut Stat) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     if sb.is_null() {
         set_errno(EFAULT);
         return -1;
@@ -2143,6 +2180,8 @@ unsafe fn stat_resolved(l: &Lookup, path: *const c_char, sb: *mut Stat, real: Re
 
 /// `sceKernelCheckReachability_impl`.
 unsafe fn reachability_impl(path: *const c_char) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     let l = unsafe { lookup_resident_path(path) };
     let rc = unsafe { reachability_resolved(&l, path) };
     stats::fs_event(b'r', how(&l), rc as i64, path);
@@ -2171,6 +2210,8 @@ unsafe fn reachability_resolved(l: &Lookup, path: *const c_char) -> c_int {
 
 /// `posix_unlink_impl`: direct first; on ENOENT/ENOTDIR retry the indexed path.
 unsafe fn unlink_impl(path: *const c_char) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     let rc = unsafe { real_posix_unlink(path) };
     let err = if rc == -1 { errno() } else { 0 };
     if rc == 0 || !should_try_index_fallback(rc, err) || !unsafe { is_app0_path(path) } {
@@ -2185,6 +2226,10 @@ unsafe fn unlink_impl(path: *const c_char) -> c_int {
 
 /// `posix_rename_impl`: as unlink, resolving either side through the index.
 unsafe fn rename_impl(from: *const c_char, to: *const c_char) -> c_int {
+    let mut devlog_from = [0u8; 256];
+    let from = unsafe { super::devlog::map_path(from, &mut devlog_from) };
+    let mut devlog_to = [0u8; 256];
+    let to = unsafe { super::devlog::map_path(to, &mut devlog_to) };
     let rc = unsafe { real_posix_rename(from, to) };
     let err = if rc == -1 { errno() } else { 0 };
     if rc == 0 {
@@ -2222,6 +2267,10 @@ const AT_FDCWD: c_int = -100;
 const W_OK: c_int = 2;
 const X_OK: c_int = 1;
 const EROFS: c_int = 30;
+/// FreeBSD `EISDIR`: a write or create open of a directory.
+const EISDIR: c_int = 21;
+/// FreeBSD `EEXIST`: mkdir of a directory that is already there.
+const EEXIST: c_int = 17;
 
 /// A runtime file by name, for both formats: `ampr_emu.index`, zstd's
 /// `ampr_zstd.index` and `ampr_zstd-NNN.pak`, LZ4's `ampr_assets.index`,
@@ -2312,6 +2361,8 @@ pub unsafe extern "C" fn underscore_open_emul(
     flags: c_int,
     mode: c_int,
 ) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     if super::hook::observed_only(hook::_open) {
         let rc = unsafe { real_underscore_open_raw(path, flags, mode) };
         unsafe { observe_note(path, b'O', rc) };
@@ -2336,6 +2387,8 @@ pub unsafe extern "C" fn underscore_openat_emul(
     flags: c_int,
     mode: c_int,
 ) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     if path.is_null() || (unsafe { *path } != b'/' as c_char && dirfd != AT_FDCWD) {
         return unsafe { real_openat(dirfd, path, flags, mode) };
     }
@@ -2348,6 +2401,8 @@ pub unsafe extern "C" fn underscore_openat_emul(
 }
 
 pub unsafe extern "C" fn posix_lstat_emul(path: *const c_char, sb: *mut Stat) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     if super::hook::observed_only(hook::lstat) {
         let rc = unsafe { real_lstat(path, sb.cast()) };
         unsafe { observe_note(path, b'l', rc) };
@@ -2364,6 +2419,8 @@ pub unsafe extern "C" fn posix_lstat_emul(path: *const c_char, sb: *mut Stat) ->
 /// authoritative miss takes the stat routing (pack overlay, else ENOENT);
 /// others the original.
 pub unsafe extern "C" fn posix_access_emul(path: *const c_char, mode: c_int) -> c_int {
+    let mut devlog_buf = [0u8; 256];
+    let path = unsafe { super::devlog::map_path(path, &mut devlog_buf) };
     if super::hook::observed_only(hook::access) {
         let rc = unsafe { real_access(path, mode) };
         unsafe { observe_note(path, b'a', rc) };

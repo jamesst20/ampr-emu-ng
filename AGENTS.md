@@ -48,7 +48,14 @@ keep their zstd names but apply to LZ4 packs too; only `AMPR_ZSTD_MMAP=1`
 (decode on access) is zstd only. Those hooks (hook ids 78 and up), the
 eager index load and the mmap cache sweep apply only to a title that ships
 packs, zstd or LZ4 (`packs_present` in `rt/pack/mod.rs`, `hook_enabled` in
-`rt/hook.rs`); a title with no packs gets the shared ids 0..=77. Among them,
+`rt/hook.rs`); a title with no packs gets the shared ids 0..=77. A pack
+title also gets `/devlog` created at module_start (`rt/devlog.rs`):
+ShadowMount+ does not mount it, and an engine that logs or caches shaders
+there stalls without it (KCD2 stops at the end of its intro). The sandbox
+root refuses that mkdir on 13.00 (EACCES), so the root is made under
+`/data/ampr_devlog` and the path hooks, `mkdir` included, rewrite
+`/devlog...` there; the game creates its own log and shader-cache
+subdirectories. Among them,
 ids 100..=109 route the game's own kernel AIO (`sceKernelAioSubmitReadCommands*`,
 poll, wait, delete, cancel) to the runtime's AIO emulation
 (`rt/pack/aio.rs`, `rt/pack/aio_wait.rs`); the runtime's own native AIO

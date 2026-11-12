@@ -50,7 +50,7 @@ const _: () = {
 #[repr(C)]
 pub struct SceKernelStat {
     _dev_ino: [u32; 2],
-    st_mode: u16,
+    pub st_mode: u16,
     _pad0: [u8; 30],
     st_mtim: SceKernelTimespec,
     _ctim: SceKernelTimespec,

@@ -227,6 +227,21 @@ pub(crate) unsafe fn ampr_pack_open_directory_impl(
             };
             real_fd = open_fn(path, flags, mode as c_int);
             *handled = true;
+            if real_fd >= 0 {
+                // A regular file sitting at an indexed directory's path is
+                // not that directory: a read-write image can collect one
+                // where the packed tree has a directory (KCD2's /app0/data
+                // gained a 20-byte file), and its fd cannot list the indexed
+                // entries. Keep the index's directory then.
+                let mut st = core::mem::MaybeUninit::<SceKernelStat>::uninit();
+                let is_dir = super::super::sys::real_physical_fstat(real_fd, st.as_mut_ptr().cast())
+                    == 0
+                    && (st.assume_init_ref().st_mode & 0o170000) == S_IFDIR;
+                if !is_dir {
+                    close_real_fd(real_fd);
+                    real_fd = -1;
+                }
+            }
         }
 
         // Read-only overlay: never turn an access/permission error or a

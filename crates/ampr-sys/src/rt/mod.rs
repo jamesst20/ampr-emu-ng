@@ -4,6 +4,7 @@ mod amm;
 #[cfg(feature = "mem_report")]
 mod blackbox;
 mod command_buffer;
+mod devlog;
 mod equeue;
 pub(crate) mod exports;
 mod fd_cache;

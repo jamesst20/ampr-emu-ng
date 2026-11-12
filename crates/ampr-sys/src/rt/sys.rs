@@ -481,10 +481,19 @@ pub mod hook {
     pub const faccessat: usize = 118;
     #[cfg(feature = "mem_report")]
     pub const readlink: usize = 119;
+    // Directory creation for a fake-mounted title: a game's mkdir under
+    // /devlog lands in the runtime's writable tree, and one on an indexed
+    // directory answers EEXIST (rt/devlog.rs, rt/index.rs
+    // posix_mkdir_emul). Packs only, both builds; after the debug probes so
+    // the release and debug tables keep their order.
     #[cfg(feature = "mem_report")]
-    pub const COUNT: usize = 120;
+    pub const mkdir: usize = 120;
     #[cfg(not(feature = "mem_report"))]
-    pub const COUNT: usize = 112;
+    pub const mkdir: usize = 112;
+    #[cfg(feature = "mem_report")]
+    pub const COUNT: usize = 121;
+    #[cfg(not(feature = "mem_report"))]
+    pub const COUNT: usize = 113;
 }
 
 /// Original (pre-detour) libkernel entry points, indexed by `hook::*`, and

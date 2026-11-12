@@ -1431,6 +1431,13 @@ pub unsafe extern "C" fn module_start(_args: usize, _argp: *const c_void) -> c_i
     unsafe { super::pack::select_pack_format() };
     #[cfg(feature = "mem_report")]
     unsafe { super::blackbox::open() };
+    // Fake-mount titles have no /devlog (the system mounts it for installed
+    // apps only), and an engine that logs or caches shaders there stalls
+    // without it; see rt/devlog.rs. Runs before the game's own module_start,
+    // after the black box opens so the debug build records its result.
+    if super::pack::packs_present() {
+        unsafe { super::devlog::ensure() };
+    }
     unsafe { notify_loaded() };
     let rc = unsafe { hook::amprInstallLibkernelHooks() };
     // Packed files have no physical copy (ampr_zstd-NNN.pak or the AMPRPAK4

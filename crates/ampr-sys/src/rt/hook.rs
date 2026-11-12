@@ -38,12 +38,13 @@ const PROT_RX: c_int = sys::SCE_KERNEL_PROT_CPU_READ | sys::SCE_KERNEL_PROT_CPU_
 const _: () = {
     assert!(PAGE % TRAMP_SIZE == 0 && SLOTS_PER_PAGE <= 32);
     assert!(POOL_COPY_PAGES <= 64 && TRAMP_PAGES == 4 + cfg!(feature = "mem_report") as usize);
-    // 10 game AIO slots 100..=109 and 2 thread-creation slots 110..=111 in
-    // both builds, and in debug builds the 8 probe slots 112..=119
-    // (rt/probe.rs). With the 5 external equeue hooks, the 4 save data hooks
-    // (rt/save.rs) and the 2 loader hooks that is 123 (release) or 131 (debug)
-    // trampolines: 4 pages x 32 slots = 128 in release, 5 pages = 160 in debug.
-    assert!(HOOK_COUNT == 112 + 8 * cfg!(feature = "mem_report") as usize);
+    // 10 game AIO slots 100..=109, 2 thread-creation slots 110..=111 and the
+    // mkdir slot (112 release, 120 debug) in both builds, and in debug builds
+    // the 8 probe slots 112..=119 (rt/probe.rs). With the 5 external equeue
+    // hooks, the 4 save data hooks (rt/save.rs) and the 2 loader hooks that is
+    // 124 (release) or 132 (debug) trampolines: 4 pages x 32 slots = 128 in
+    // release, 5 pages = 160 in debug.
+    assert!(HOOK_COUNT == 113 + 8 * cfg!(feature = "mem_report") as usize);
     assert!(HOOK_COUNT + EXT_COUNT + SAVE_COUNT + LOADER_COUNT <= TRAMP_PAGES * SLOTS_PER_PAGE);
 };
 
@@ -125,9 +126,9 @@ use super::equeue::{
     sceVideoOutAddPreVblankStartEvent_emul, sceVideoOutAddVblankEvent_emul,
 };
 use super::index::{
-    posix_access_emul, posix_lstat_emul, posix_open_emul, posix_rename_emul, posix_stat_emul,
-    posix_unlink_emul, sceKernelCheckReachability_emul, sceKernelOpen_emul, sceKernelStat_emul,
-    underscore_open_emul, underscore_openat_emul,
+    posix_access_emul, posix_lstat_emul, posix_mkdir_emul, posix_open_emul, posix_rename_emul,
+    posix_stat_emul, posix_unlink_emul, sceKernelCheckReachability_emul, sceKernelOpen_emul,
+    sceKernelStat_emul, underscore_open_emul, underscore_openat_emul,
 };
 use super::pack::mmap::{mmap_emul, munmap_emul, sceKernelMmap_emul, sceKernelMunmap_emul};
 use super::pack::zstd_libc::{
@@ -348,6 +349,7 @@ hook_table! {
     c"faccessat" => probe::faccessat_probe, O;
     #[cfg(feature = "mem_report")]
     c"readlink" => probe::readlink_probe, O;
+    c"mkdir" => posix_mkdir_emul, O;
 }
 
 /// `g_externalEqueueHooks`: order is `AmprExternalEqueueHookId`.
