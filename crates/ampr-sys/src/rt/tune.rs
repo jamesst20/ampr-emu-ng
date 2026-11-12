@@ -97,6 +97,7 @@ const THREAD_BUDGET_KNOB: usize = 18;
 const SPIN_US: usize = 19;
 const REGROW_S: usize = 20;
 const WORKER_STACK_KIB: usize = 21;
+const FDREAD: usize = 22;
 
 // ---- runtime thread lifetime (rt/thread_hooks.rs) ----
 // Release values; the debug knobs of the same names default to them.
@@ -121,7 +122,7 @@ const READ_LIMIT_MAX_KIB: u32 = 16 * 1024;
 
 /// Cache sizes: 0 turns a cache off (reads bypass it); otherwise the cache
 /// allocators' minimums apply (decoded 16, physical 8 MiB, pack/manifest.rs).
-pub(crate) static KNOBS: [Knob; 22] = [
+pub(crate) static KNOBS: [Knob; 23] = [
     knob(
         "decoded_mib",
         false,
@@ -216,6 +217,10 @@ pub(crate) static KNOBS: [Knob; 22] = [
     knob("spin_us", true, 0, 200, SPIN_US_DEFAULT),
     knob("regrow_s", true, 1, 60, REGROW_S_DEFAULT),
     knob("worker_stack_kib", false, 0, 1024, WORKER_STACK_KIB_DEFAULT),
+    // Hand packed reads to the ampr_fd_read threads (1, default) or run them
+    // inline on the calling game thread (0, slower), as a way to tell a
+    // read-thread problem from a data problem (rt/pack/fd_read.rs).
+    knob("fdread", true, 0, 1, 1),
 ];
 
 /// (name, [decoded_mib, physical_mib, workers, pipelines]). `pipelines` is
@@ -405,6 +410,15 @@ pub(crate) fn per_read_active_chunks() -> u32 {
         AMPR_EMU_APR_PER_READ_ACTIVE_CHUNKS
     }
 }
+/// Hand packed reads to the read threads; 0 reads inline on the caller.
+pub(crate) fn fdread() -> bool {
+    if ON {
+        get(FDREAD) != 0
+    } else {
+        true
+    }
+}
+
 /// 1: a priority lane's next job may parse while the head job has only
 /// completion commands left (reactor/lane_overlap.rs); 0: one parsing job per
 /// lane, as in release.

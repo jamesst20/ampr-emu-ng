@@ -723,6 +723,9 @@ unsafe fn read_on_read_thread(
     offset: u64,
     length: u64,
 ) -> ssize_t {
+    if !super::super::tune::fdread() {
+        return unsafe { read_on_workers(fd, vector, offset, length) };
+    }
     // No read thread (its first creation failed and the retry is not due,
     // or after shutdown): read inline. An error instead would fail every packed read,
     // also on the large-stack threads that read fine inline; only a

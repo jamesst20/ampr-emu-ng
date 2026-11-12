@@ -105,9 +105,12 @@ curl 'http://<ps5-ip>:9090/set?profile=low'         # low, medium or high
 `/set` applies the pairs in order and stops at the first bad one, then
 rewrites the file and lists every knob. Live knobs (read-ahead and its gate,
 pread pool switches, reactor issue limits, lane EOP overlap, thread budget,
-`spin_us`, `regrow_s`, `pread_wake_all`) apply from the next read or reactor
+`spin_us`, `regrow_s`, `pread_wake_all`, `fdread`) apply from the next read or reactor
 pass. Startup knobs (cache sizes, workers, pipelines, `pread_threads`,
 `zstd_verify`, `equeue_local`, `worker_stack_kib`) apply at the next launch.
+`fdread` (default 1) hands packed reads to the read threads; 0 reads
+inline on the calling thread, slower, to tell a read-thread problem from a
+data problem.
 A profile sets `decoded_mib`, `physical_mib`, `workers` and `pipelines`;
 caches past the 32 MiB Cache ledger are cut to fit, and workers or windows
 past the Buffer ledger are refused.
